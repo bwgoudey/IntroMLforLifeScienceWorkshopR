@@ -1,0 +1,78 @@
+---
+title: "Intro to Machine Learning For LIfe Sciences"
+author: "Benjamin Goudey"
+date: "2024-04-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(MASS)  # for mvnorm (multivariate normal data generation)
+library(scales)  # for rescaling data'
+if (!requireNamespace("pROC", quietly = TRUE)) {
+  remotes::install_github("xrobin/pROC")
+}
+library(pROC)
+if (!requireNamespace("DataExplorer", quietly = TRUE)) {
+  install.packages("DataExplorer")
+}
+library(DataExplorer)
+
+library(tidymodels)
+
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+# Read the dataset and make sure it's similar to sklearn's format
+source('./helpers.R')
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+diabetes_df = load_diabetes_data(n_random=40)
+```
+
+```{r report}
+create_report(diabetes_df$original)
+```
+
+
+```{r}
+# Setting up the model specification
+logit_spec <- logistic_reg(mode = "classification", penalty = 0, engine = "glm")
+
+# Setting up the workflow
+workflow <- workflow() %>%
+  add_model(logit_spec) %>%
+  add_formula(y ~ .) # Any variable on the left-hand side of the tilde (~) is considered the model outcome (here, arr_delay). On the right-hand side of the tilde are the predictors. Variables may be listed by name, or you can use the dot (.) to indicate all other variables as predictors.
+
+# Fitting the model
+fit <- workflow %>%
+  fit(data = diabetes_df$original)
+
+# Making predictions
+yp_training <- predict(fit, new_data = diabetes_df$original, type = "prob") %>%
+  pull(.pred_0)
+
+yp_testing <- predict(fit, new_data = diabetes_df$simulated, type = "prob") %>%
+  pull(.pred_1)
+
+# Plot training and external validation ROC curves
+p1 <- plot_roc(diabetes_df$original$y, yp_training, "Training")
+p2 <- plot_roc(diabetes_df$simulated$y, yp_testing, "External")
+
+# Print or plot the ROC curves
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
