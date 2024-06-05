@@ -6,6 +6,9 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
+if (as.numeric(gsub('^([0-9]\\.[0-9]).*', '\\1', packageVersion('ggplot2')))<3.5) {
+  remotes::install_github('tidyverse/ggplot2')
+}
 library(tidyverse)
 library(MASS)  # for mvnorm (multivariate normal data generation)
 library(scales)  # for rescaling data'
@@ -16,9 +19,14 @@ library(pROC)
 if (!requireNamespace("DataExplorer", quietly = TRUE)) {
   install.packages("DataExplorer")
 }
-library(DataExplorer)
+library(remotes)
 
+library(DataExplorer)
+if (!requireNamespace("tidymodels", quietly = TRUE)) {
+    install.packages("tidymodels")
+}
 library(tidymodels)
+library(patchwork)
 
 ```
 
@@ -30,8 +38,8 @@ When you click the **Knit** button a document will be generated that includes bo
 
 ```{r cars}
 # Read the dataset and make sure it's similar to sklearn's format
-source('./helpers.R')
-
+#source('./helpers.R')
+devtools::source_url('https://raw.githubusercontent.com/bwgoudey/IntroMLforLifeScienceWorkshopR/main/helpers.R')
 ```
 
 ## Including Plots
@@ -39,11 +47,18 @@ source('./helpers.R')
 You can also embed plots, for example:
 
 ```{r pressure, echo=FALSE}
-diabetes_df = load_diabetes_data(n_random=40)
+set.seed(1)
+diabetes_df <- read.csv(url("https://raw.githubusercontent.com/bwgoudey/IntroMLforLifeScienceWorkshopR/main/RC_health_data_n2000.csv"))
+diabetes_df = diabetes_df %>% 
+  dplyr::select(-id) %>% #, -censor_of_diabetes_at_followup_1_yes_0_no,-X) %>% 
+    mutate(diabetes=factor(diabetes))
+I_training=sample(x = 1:nrow(diabetes_df), size = ceiling(nrow(diabetes_df)*.8))
+diabetes_train_df = diabetes_df[I_training, ]
+diabetes_test_df= diabetes_df[-I_training, ]
 ```
 
 ```{r report}
-create_report(diabetes_df$original)
+DataExplorer::create_report(diabetes_train_df)
 ```
 
 
@@ -54,25 +69,55 @@ logit_spec <- logistic_reg(mode = "classification", penalty = 0, engine = "glm")
 # Setting up the workflow
 workflow <- workflow() %>%
   add_model(logit_spec) %>%
-  add_formula(y ~ .) # Any variable on the left-hand side of the tilde (~) is considered the model outcome (here, arr_delay). On the right-hand side of the tilde are the predictors. Variables may be listed by name, or you can use the dot (.) to indicate all other variables as predictors.
+  add_formula(diabetes ~ .) # Any variable on the left-hand side of the tilde (~) is considered the model outcome (here, arr_delay). On the right-hand side of the tilde are the predictors. Variables may be listed by name, or you can use the dot (.) to indicate all other variables as predictors.
 
 # Fitting the model
 fit <- workflow %>%
-  fit(data = diabetes_df$original)
+  fit(data = diabetes_train_df) #%>% dplyr::select(-fpg_of_final_visit_mmol_l))
 
 # Making predictions
-yp_training <- predict(fit, new_data = diabetes_df$original, type = "prob") %>%
+yp_training <- predict(fit, new_data = diabetes_train_df, type = "prob") %>%
   pull(.pred_0)
 
-yp_testing <- predict(fit, new_data = diabetes_df$simulated, type = "prob") %>%
+yp_testing <- predict(fit, new_data = diabetes_test_df, type = "prob") %>%
   pull(.pred_1)
 
 # Plot training and external validation ROC curves
-p1 <- plot_roc(diabetes_df$original$y, yp_training, "Training")
-p2 <- plot_roc(diabetes_df$simulated$y, yp_testing, "External")
-
+p1 <- plot_roc(y = as.numeric(diabetes_train_df$diabetes)-1, yp=yp_training, "Training")
+p2 <- plot_roc(y = as.numeric(diabetes_test_df$diabetes)-1, yp=yp_testing, "Testing")
 # Print or plot the ROC curves
 gridExtra::grid.arrange(p1, p2, nrow = 1)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+
+# Define the models
+models=list()
+models[['log_reg']]=logistic_reg(mode = "classification", penalty = 0, engine = "glm")
+
+models[['lasso']]=logistic_reg(penalty = 0.1, mixture = 1) %>% set_engine("glmnet")
+
+models[['rf']]=rand_forest(mtry = 2, trees = 500, min_n = 3) %>% set_engine("randomForest")
+
+models[['decision_tree']]=decision_tree(tree_depth = 5) %>% set_engine("rpart")
+
+# Fit the model of interest
+#Change this model 
+current_model=models[['rf']] %>% set_mode("classification")
+
+model_fit <- current_model %>% 
+  fit(diabetes ~ ., data = diabetes_train_df)
+
+# Get predicted labels from the model
+y_pred <- predict(model_fit, diabetes_train_df, type = "prob")$.pred_1
+y_ext_pred <- predict(model_fit, diabetes_test_df, type = "prob")$.pred_1
+
+p1 <- plot_roc(y = as.numeric(diabetes_train_df$diabetes)-1, yp=yp_training, "Training")
+p2 <- plot_roc(y = as.numeric(diabetes_test_df$diabetes)-1, yp=yp_testing, "Testing")
+
+# Combine plots
+p1 + p2
+```
+
