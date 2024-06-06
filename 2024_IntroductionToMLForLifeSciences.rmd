@@ -47,18 +47,39 @@ devtools::source_url('https://raw.githubusercontent.com/bwgoudey/IntroMLforLifeS
 You can also embed plots, for example:
 
 ```{r pressure, echo=FALSE}
-set.seed(1)
-diabetes_df <- read.csv(url("https://raw.githubusercontent.com/bwgoudey/IntroMLforLifeScienceWorkshopR/main/RC_health_data_n2000.csv"))
+diabetes_df <- read.csv(url("https://raw.githubusercontent.com/bwgoudey/IntroMLforLifeScienceWorkshopR/main/RC_health_data_n2000.csv")) %>% filter(!is.na(id))
 diabetes_df = diabetes_df %>% 
   dplyr::select(-id) %>% #, -censor_of_diabetes_at_followup_1_yes_0_no,-X) %>% 
     mutate(diabetes=factor(diabetes))
-I_training=sample(x = 1:nrow(diabetes_df), size = ceiling(nrow(diabetes_df)*.8))
-diabetes_train_df = diabetes_df[I_training, ]
-diabetes_test_df= diabetes_df[-I_training, ]
+
+set.seed(1)
+train_test_split=initial_split(diabetes_df, prop = 0.8)
+diabetes_train_df = training(data_split)
+diabetes_test_df= testing(data_split)
 ```
 
 ```{r report}
 DataExplorer::create_report(diabetes_train_df)
+```
+```{r}
+
+plot_roc_auc <- function(yp_train_df, yp_test_df) {
+  rf_preds =rbind(yp_train_df, yp_test_df) %>% mutate(subset=factor(subset, c("train", "test")))
+
+  auc_df = rf_preds %>% group_by(subset) %>% yardstick::roc_auc(truth = diabetes, .pred_0)  %>% rename(auc=.estimate)
+  roc_curve_df<-rf_preds %>% group_by(subset) %>% yardstick::roc_curve(truth = diabetes, .pred_0)
+  metrics_df = roc_curve_df %>% left_join(auc_df, by='subset')  
+  
+  # Plot training and external validation ROC curves
+  metrics_df %>% 
+    ggplot(aes(x=1-specificity, y=sensitivity, color=subset)) + 
+    geom_point(size=0.5) + 
+    theme_light(base_size = 16) + 
+    geom_text(
+      aes(x = 0.6, y = 0.3, label = paste("AUC =", round(auc,3))),
+      size = 5,  inherit.aes = FALSE
+  ) +  facet_wrap(~subset, nrow=1) + theme(legend.position = 'none')
+}
 ```
 
 
@@ -73,20 +94,21 @@ workflow <- workflow() %>%
 
 # Fitting the model
 fit <- workflow %>%
-  fit(data = diabetes_train_df) #%>% dplyr::select(-fpg_of_final_visit_mmol_l))
+  fit(data = diabetes_train_df) 
 
-# Making predictions
-yp_training <- predict(fit, new_data = diabetes_train_df, type = "prob") %>%
-  pull(.pred_0)
+# Make predictions
+rf_training_pred <- 
+  predict(fit, diabetes_train_df, type = "prob") %>% 
+  bind_cols(diabetes_train_df %>% dplyr::select(diabetes)) %>% 
+  mutate(subset="train")
 
-yp_testing <- predict(fit, new_data = diabetes_test_df, type = "prob") %>%
-  pull(.pred_1)
+rf_testing_pred <- 
+  predict(fit, diabetes_test_df, type = "prob") %>% 
+  bind_cols(diabetes_test_df %>% dplyr::select(diabetes)) %>% 
+  mutate(subset="test")
 
-# Plot training and external validation ROC curves
-p1 <- plot_roc(y = as.numeric(diabetes_train_df$diabetes)-1, yp=yp_training, "Training")
-p2 <- plot_roc(y = as.numeric(diabetes_test_df$diabetes)-1, yp=yp_testing, "Testing")
-# Print or plot the ROC curves
-gridExtra::grid.arrange(p1, p2, nrow = 1)
+plot_roc_auc(rf_training_pred, rf_testing_pred)
+
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
@@ -95,29 +117,72 @@ Note that the `echo = FALSE` parameter was added to the code chunk to prevent pr
 
 # Define the models
 models=list()
-models[['log_reg']]=logistic_reg(mode = "classification", penalty = 0, engine = "glm")
-
+models[['log_reg']]=logistic_reg(mode = "classification", penalty = 0) %>% set_engine("glm")
 models[['lasso']]=logistic_reg(penalty = 0.1, mixture = 1) %>% set_engine("glmnet")
-
 models[['rf']]=rand_forest(mtry = 2, trees = 500, min_n = 3) %>% set_engine("randomForest")
-
 models[['decision_tree']]=decision_tree(tree_depth = 5) %>% set_engine("rpart")
+
+models = sapply(models, \(m) m %>% set_mode("classification"), simplify = F, USE.NAMES = T)
 
 # Fit the model of interest
 #Change this model 
-current_model=models[['rf']] %>% set_mode("classification")
+current_model=models[["log_reg"]] %>% set_mode("classification")
 
 model_fit <- current_model %>% 
   fit(diabetes ~ ., data = diabetes_train_df)
 
 # Get predicted labels from the model
-y_pred <- predict(model_fit, diabetes_train_df, type = "prob")$.pred_1
-y_ext_pred <- predict(model_fit, diabetes_test_df, type = "prob")$.pred_1
+yp_training <- predict(model_fit, diabetes_train_df, type = "prob")$.pred_1
+yp_testing <- predict(model_fit, diabetes_test_df, type = "prob")$.pred_1
 
 p1 <- plot_roc(y = as.numeric(diabetes_train_df$diabetes)-1, yp=yp_training, "Training")
 p2 <- plot_roc(y = as.numeric(diabetes_test_df$diabetes)-1, yp=yp_testing, "Testing")
 
 # Combine plots
 p1 + p2
+
+```
+```{r}
+library(rpart.plot)
+
+# Define the model
+dt_model <- models[['decision_tree']] 
+
+# Fit the model
+dt_fit <- dt_model %>%
+  fit(diabetes ~ ., data = diabetes_train_df, model=T)
+
+# Plot the decision tree
+rpart.plot(dt_fit$fit, type = 3, extra = 104, cex = 0.8, fallen.leaves = TRUE, tweak = 1.2, 
+           box.palette = "RdYlGn", shadow.col = "gray", nn = TRUE)
+```
+
+```{r}
+
+metrics_dict <- metric_set(accuracy, bal_accuracy, roc_auc, mn_log_loss, precision)
+all_workflows <-  workflow_set(
+    preproc = list("formula" = class ~ .),
+    models = models
+  )
+all_workflows <- all_workflows %>% 
+  # Specifying arguments here adds to any previously set with `option_add()`:
+  workflow_map("fit_resamples", resamples = data_split)
+
+rank_results(all_workflows, rank_metric = "roc_auc")
+
+res <- lapply(names(models), \(nm) {
+  
+  
+
+  current_model=models[["log_reg"]] %>% set_mode("classification")
+
+  model_fit <- current_model %>% 
+    fit(diabetes ~ ., data = diabetes_train_df)
+
+# Get predicted labels from the model
+  yp_training <- predict(model_fit, diabetes_train_df, type = "prob")$.pred_1
+  yp_testing <- predict(model_fit, diabetes_test_df, type = "prob")$.pred_1
+  
+})
 ```
 

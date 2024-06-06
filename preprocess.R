@@ -28,7 +28,8 @@ matched_filtered_dat = filtered_dat[c(as.numeric(I$match.matrix),
   ungroup() 
 
 dat<-matched_filtered_dat %>% 
-  dplyr::select(-site)
+  dplyr::select(-site) %>% 
+  filter(!is.na(id)
 
 #dat
 
