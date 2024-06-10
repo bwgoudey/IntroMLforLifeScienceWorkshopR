@@ -54,13 +54,13 @@ initial_split_to_rset <- function(inital_split_obj, df, all=FALSE, df2=NULL) {
 }
 
 
-append_rand_feat <- function(df, add_n_features = 20) {
-  rand_feats <- matrix(runif(nrow(df) * add_n_features), nrow = nrow(df), ncol = add_n_features)
+append_rand_feat <- function(data_df, add_n_features = 20) {
+  rand_feats <- matrix(runif(nrow(data_df) * add_n_features), nrow = nrow(data_df), ncol = add_n_features)
   rand_feats <- scale(rand_feats)
   feat_names <- paste0("random_", seq_len(add_n_features))
   rand_feats_df <- as.data.frame(rand_feats)
   colnames(rand_feats_df) <- feat_names
-  return(bind_cols(df, rand_feats_df))
+  return(bind_cols(data_df, rand_feats_df))
 }
 
 load_diabetes_data <- function(diabetes_df_raw, nsamples=1000, add_n_features=100) {
@@ -69,7 +69,7 @@ load_diabetes_data <- function(diabetes_df_raw, nsamples=1000, add_n_features=10
     mutate(diabetes=factor(diabetes)) 
   
   if(add_n_features>0) {
-    diabetes_df = append_rand_feat(df, add_n_features)
+    diabetes_df = append_rand_feat(diabetes_df, add_n_features)
   }
   
   nsamples= min(nsamples, nrow(diabetes_df), na.rm = T)
