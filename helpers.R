@@ -69,7 +69,7 @@ load_diabetes_data <- function(diabetes_df_raw, nsamples=1000, add_features=100)
     mutate(diabetes=factor(diabetes)) 
   
   if(add_features>0) {
-    diabetes_df = append_noise(df, add_features)
+    diabetes_df = append_rand_feat(df, add_features)
   }
   
   nsamples= min(nsamples, nrow(diabetes_df), na.rm = T)
