@@ -123,7 +123,7 @@ load_diabetes_data <- function(diabetes_df_raw, nsamples=1000, add_n_features=10
   set.seed(seed) 
   
   diabetes_df = diabetes_df_raw %>% 
-    dplyr::select(-id) %>% #, -censor_of_diabetes_at_followup_1_yes_0_no,-X) %>% 
+    dplyr::select(-id,-year_of_followup) %>% #, -censor_of_diabetes_at_followup_1_yes_0_no,-X) %>% 
     mutate(diabetes=factor(diabetes)) 
   
   if(add_n_features>0) {
@@ -131,12 +131,11 @@ load_diabetes_data <- function(diabetes_df_raw, nsamples=1000, add_n_features=10
   }
   
   nsamples= min(nsamples, nrow(diabetes_df), na.rm = T)
-  diabetes_study1_df=diabetes_df %>% group_by(diabetes) %>% slice_head(n=ceiling(nsamples/2)) %>% ungroup()
-  diabetes_study2_df=diabetes_df %>% group_by(diabetes) %>% slice_head(n=20) %>% ungroup()
+  diabetes_study1_df=diabetes_df %>% filter(site==5) %>% group_by(diabetes) %>% slice_head(n=ceiling(nsamples/2)) %>% ungroup()
+  diabetes_study2_df=diabetes_df %>% filter(site!=5) %>% group_by(diabetes) %>% ungroup()
   
-  
-  diabetes=list(study1=diabetes_study1_df, 
-                study2=diabetes_study2_df)
+  diabetes=list(study1=diabetes_study1_df %>% dplyr::select(-site), 
+                study2=diabetes_study2_df%>% dplyr::select(-site))
   
   return(diabetes)
 }
