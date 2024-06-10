@@ -115,10 +115,12 @@ initial_split_to_rset <- function(inital_split_obj, df, all=FALSE, df2=NULL) {
                       indicies)
                       
     splits <- lapply(indicies, make_splits, data = diabetes_df_all %>% dplyr::select(-study))
-    train_test_split_rset <- manual_rset(splits, c("Train:All,Test:All", 
-                                                   "Train:Training,Test=Training", 
-                                                   "Train:Training,Test=Test",
-                                                   "Train:Dataset1, Test:Dataset2"))
+    prop=round(100*length(train_test_split$in_id)/nrow(df))
+    train_test_split_rset <- manual_rset(splits, 
+                                         c("Train:Dataset1,Test:Dataset1",  
+                                           "Train:Dataset1, Test:Dataset2",
+                                           sprintf("Train:%d%% Dataset1,Test=%d%% Dataset1",prop,prop), 
+                                           sprintf("Train:%d%% Dataset1,Test=%d%% Dataset1",prop,100-prop)))
   } else {
     splits <- lapply(indicies, make_splits, data = df)
     train_test_split_rset <- manual_rset(splits, c("Training", "Testing"))
