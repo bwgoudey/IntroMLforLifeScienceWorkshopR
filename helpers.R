@@ -19,7 +19,63 @@ plot_roc_auc <- function(yp_train_df, yp_test_df, label) {
       aes(x = 0.6, y = 0.3, label = paste("AUC =", round(auc,3))),
       size = 5,  inherit.aes = FALSE
     ) +  facet_wrap(~subset, nrow=1) + theme(legend.position = 'none')
+
 }
+
+
+
+
+# Wrap the split in an rset object
+df_to_rset <- function(df1, df2, all=FALSE, df3=NULL) {
+  
+  diabetes_df_all = rbind(
+    df1 %>% mutate(study="Study1"), 
+    df2 %>% mutate(study="Study2")
+  )
+  I_study1=which(diabetes_df_all$study=="Study1")
+  I_study2=which(diabetes_df_all$study=="Study2")
+  
+  indicies = list(list(analysis=I_study1, assessment=I_study1), 
+                  list(analysis=I_study1, assessment=I_study2))
+  
+  splits <- lapply(indicies, make_splits, data = diabetes_df_all %>% dplyr::select(-study))
+  train_test_split_rset <- manual_rset(splits, c("Train:Dataset1,Test=Dataset1", 
+                                                 "Train:Dataset1, Test:Dataset2"))
+  train_test_split_rset
+}
+
+initial_split_to_rset <- function(inital_split_obj, df, all=FALSE, df2=NULL) {
+  # Wrap the split in an rset object
+  indicies = list(
+    list(analysis=inital_split_obj$in_id, 
+         assessment=inital_split_obj$in_id), 
+    list(analysis=inital_split_obj$in_id,
+         assessment=setdiff(1:nrow(df), inital_split_obj$in_id)))
+  
+  if(all) {
+    diabetes_df_all = rbind(
+      df %>% mutate(study="Study1"), 
+      df2 %>% mutate(study="Study2")
+    )
+    I_study1=which(diabetes_df_all$study=="Study1")
+    I_study2=which(diabetes_df_all$study=="Study2")
+    stopifnot(!is.null(df2))
+    indicies = append(list(list(analysis=I_study1, assessment=I_study1), 
+                           list(analysis=I_study1, assessment=I_study2)), 
+                      indicies)
+    
+    splits <- lapply(indicies, make_splits, data = diabetes_df_all %>% dplyr::select(-study))
+    train_test_split_rset <- manual_rset(splits, c("Train:All,Test:All", 
+                                                   "Train:Training,Test=Training", 
+                                                   "Train:Training,Test=Test",
+                                                   "Train:Dataset1, Test:Dataset2"))
+  } else {
+    splits <- lapply(indicies, make_splits, data = df)
+    train_test_split_rset <- manual_rset(splits, c("Training", "Testing"))
+  }
+}
+
+
 
 
 initial_split_to_rset <- function(inital_split_obj, df, all=FALSE, df2=NULL) {
@@ -63,7 +119,9 @@ append_rand_feat <- function(data_df, add_n_features = 20) {
   return(bind_cols(data_df, rand_feats_df))
 }
 
-load_diabetes_data <- function(diabetes_df_raw, nsamples=1000, add_n_features=100) {
+load_diabetes_data <- function(diabetes_df_raw, nsamples=1000, add_n_features=100,seed=1) {
+  set.seed(seed) 
+  
   diabetes_df = diabetes_df_raw %>% 
     dplyr::select(-id) %>% #, -censor_of_diabetes_at_followup_1_yes_0_no,-X) %>% 
     mutate(diabetes=factor(diabetes)) 
