@@ -45,19 +45,18 @@ devtools::source_url('https://raw.githubusercontent.com/bwgoudey/IntroMLforLifeS
 ## Including Plots
 
 You can also embed plots, for example:
-
+### Load data
 ```{r pressure, echo=FALSE}
-diabetes_df <- read.csv(url("https://raw.githubusercontent.com/bwgoudey/IntroMLforLifeScienceWorkshopR/main/RC_health_data_n2000.csv")) %>% filter(!is.na(id))
-diabetes_df = diabetes_df %>% 
-  dplyr::select(-id) %>% #, -censor_of_diabetes_at_followup_1_yes_0_no,-X) %>% 
-    mutate(diabetes=factor(diabetes))
+diabetes_df_raw <- read.csv(url("https://raw.githubusercontent.com/bwgoudey/IntroMLforLifeScienceWorkshopR/main/RC_health_data_n2000.csv")) %>% filter(!is.na(id))
 
-set.seed(1)
-train_test_split=initial_split(diabetes_df, prop = 0.8)
-diabetes_train_df = training(data_split)
-diabetes_test_df= testing(data_split)
+diabetes_data <- load_diabetes_data(diabetes_df_raw, nsamples=2000, add_features=100)
+
+diabetes_study1_df <- diabetes_data[['study1']]
+diabetes_study2_df <- diabetes_data[['study2']]
+
+
 ```
-
+### Explored data
 ```{r report}
 DataExplorer::create_report(diabetes_train_df)
 ```
@@ -81,8 +80,8 @@ plot_roc_auc <- function(yp_train_df, yp_test_df) {
   ) +  facet_wrap(~subset, nrow=1) + theme(legend.position = 'none')
 }
 ```
-
-
+## Ex 1
+### Fitting a model
 ```{r}
 # Setting up the model specification
 logit_spec <- logistic_reg(mode = "classification", penalty = 0, engine = "glm")
@@ -112,7 +111,8 @@ plot_roc_auc(rf_training_pred, rf_testing_pred)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
-
+## Ex 2
+### Compare different models
 ```{r}
 
 # Define the models
@@ -142,6 +142,8 @@ p2 <- plot_roc(y = as.numeric(diabetes_test_df$diabetes)-1, yp=yp_testing, "Test
 p1 + p2
 
 ```
+
+### Specific model output
 ```{r}
 library(rpart.plot)
 
@@ -156,33 +158,110 @@ dt_fit <- dt_model %>%
 rpart.plot(dt_fit$fit, type = 3, extra = 104, cex = 0.8, fallen.leaves = TRUE, tweak = 1.2, 
            box.palette = "RdYlGn", shadow.col = "gray", nn = TRUE)
 ```
-
+### Test multiple metrics
 ```{r}
 
-metrics_dict <- metric_set(accuracy, bal_accuracy, roc_auc, mn_log_loss, precision)
-all_workflows <-  workflow_set(
-    preproc = list("formula" = class ~ .),
+train_test_split_rset <- initial_split_to_rset(train_test_split, diabetes_df)
+metrics_dict <- metric_set(accuracy, bal_accuracy, roc_auc, mn_log_loss)
+
+multi_model_workflow <-  workflow_set(
+    preproc = list("formula" = diabetes ~ .),
     models = models
   )
-all_workflows <- all_workflows %>% 
-  # Specifying arguments here adds to any previously set with `option_add()`:
-  workflow_map("fit_resamples", resamples = data_split)
 
-rank_results(all_workflows, rank_metric = "roc_auc")
+# Fit models with resampling and pass options
+results <- multi_model_workflow %>%
+  workflow_map(
+    "fit_resamples",
+    resamples = train_test_split_rset,
+    metrics = metrics_dict,
+    control = control_resamples(save_pred = TRUE)
+  )
 
-res <- lapply(names(models), \(nm) {
-  
-  
+# Collect the metrics
+metrics <- results %>%
+  tune::collect_metrics(summarize=FALSE)
 
-  current_model=models[["log_reg"]] %>% set_mode("classification")
+# Print the performance table
+metrics %>% 
+  pivot_wider(id_cols=c(wflow_id,id), names_from = `.metric`, values_from = `.estimate` ) %>% filter(id=='Training')%>% knitr::kable(digits=3, format='html')
 
-  model_fit <- current_model %>% 
-    fit(diabetes ~ ., data = diabetes_train_df)
+metrics %>% 
+  pivot_wider(id_cols=c(wflow_id,id), names_from = `.metric`, values_from = `.estimate` ) %>% filter(id=='Testing') %>% knitr::kable(digits=3, format='html')
 
-# Get predicted labels from the model
-  yp_training <- predict(model_fit, diabetes_train_df, type = "prob")$.pred_1
-  yp_testing <- predict(model_fit, diabetes_test_df, type = "prob")$.pred_1
-  
-})
+
 ```
+
+
+
+# external eval
+```{r}
+# Setup three types of splits
+# 1 Where we train on everything
+# 2 Where we train on the trianing data and test on the training data
+# 3 Where we train on the training data and test on the test data
+train_test_split_rset <- initial_split_to_rset(train_test_split, diabetes_df, all=T, df2=diabetes_study2_df)
+
+metrics_dict <- metric_set(roc_auc)
+
+multi_model_workflow <-  workflow_set(
+    preproc = list("formula" = diabetes ~ .),
+    models = models
+  )
+
+# Fit models with resampling and pass options
+results <- multi_model_workflow %>%
+  workflow_map(
+    "fit_resamples",
+    resamples = train_test_split_rset,
+    metrics = metrics_dict,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+# Collect the metrics
+metrics <- results %>%
+  tune::collect_metrics(summarize=FALSE, type = "wide")
+
+metrics %>% 
+  ggplot(aes(x=id, y=.estimate, fill=model)) + 
+  geom_col(position='dodge') + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.5)) + 
+  ylab("AUC") + theme_light(base_size=18)
+
+
+
+```
+
+```{r}
+metrics_dict <- metric_set(roc_auc)
+
+multi_model_workflow <-  workflow_set(
+    preproc = list("formula" = diabetes ~ .),
+    models = models
+  )
+
+# K-fold cross-validation
+kfold=vfold_cv(diabetes_df, v = 3, repeats = 2)
+
+# Fit models with resampling and pass options
+results <- multi_model_workflow %>%
+  workflow_map(
+    "fit_resamples",
+    resamples = kfold,
+    metrics = metrics_dict,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+# Collect the metrics
+metrics <- results %>%
+  tune::collect_metrics(summarize=FALSE, type = "wide")
+
+metrics %>% 
+  ggplot(aes(x=model, y=.estimate, fill=model)) + 
+  geom_boxplot(position='dodge') + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.5)) + 
+  ylab("AUC") + theme_light(base_size=18)
+```
+
+
 
