@@ -19,18 +19,18 @@ filtered_dat=x %>%
 matchit.out=MatchIt::matchit(diabetes ~ age_y +
                      gender_1_male_2_female + 
                      site, data=filtered_dat,
-                   method = "nearest", distance ="glm",ratio = 1,replace = FALSE)
+                   method = "nearest", distance ="glm",ratio = 2,replace = FALSE)
 
-matched_filtered_dat = filtered_dat[c(as.numeric(I$match.matrix),
+matched_filtered_dat = filtered_dat[c(as.numeric(matchit.out$match.matrix),
                             which(filtered_dat$diabetes==1)), ] %>%
+  filter(site %in% c(6,8,5))
   group_by(diabetes) %>% 
-  slice_head(n=1000) %>% 
+  slice_head(n=2000) %>% 
   ungroup() 
 
 dat<-matched_filtered_dat %>% 
-  dplyr::select(-site) %>% 
-  filter(!is.na(id)
+  filter(!is.na(id))
 
 #dat
 
-write.csv(dat, file = './RC_health_data_n2000.csv', row.names = F)
+write.csv(dat, file = './RC_health_data_n3266.csv', row.names = F)
