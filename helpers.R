@@ -139,3 +139,34 @@ initial_split_to_rset <- function(inital_split_obj, df, all=FALSE, df2=NULL) {
     train_test_split_rset <- manual_rset(splits, c("Training", "Testing"))
   }
 }
+
+
+append_rand_feat <- function(df, n = 20) {
+  rand_feats <- matrix(runif(nrow(df) * n), nrow = nrow(df), ncol = n)
+  rand_feats <- scale(rand_feats)
+  feat_names <- paste0("random_", seq_len(n))
+  rand_feats_df <- as.data.frame(rand_feats)
+  colnames(rand_feats_df) <- feat_names
+  return(bind_cols(df, rand_feats_df))
+}
+
+load_diabetes_data <- function(diabetes_df_raw, nsamples=1000, add_features=100) {
+  diabetes_df = diabetes_df_raw %>% 
+    dplyr::select(-id) %>% #, -censor_of_diabetes_at_followup_1_yes_0_no,-X) %>% 
+    mutate(diabetes=factor(diabetes)) 
+  
+  if(add_features>0) {
+    diabetes_df = append_noise(df, add_features)
+  }
+  
+  nsamples= min(nsamples, nrow(diabetes_df), na.rm = T)
+  diabetes_study1_df=diabetes_df %>% group_by(diabetes) %>% slice_head(n=ceiling(nsamples/2)) %>% ungroup()
+  diabetes_study2_df=diabetes_df %>% group_by(diabetes) %>% slice_head(n=20) %>% ungroup()
+  
+  
+  diabetes=list(study1=diabetes_study1_df, 
+                study2=diabetes_study2_df)
+  
+  return(diabetes)
+}
+
