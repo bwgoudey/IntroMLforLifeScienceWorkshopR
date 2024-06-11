@@ -44,18 +44,9 @@ diabetes_df_raw <- read.csv("./RC_health_data_n3266.csv") %>% filter(!is.na(id))
 
 diabetes_data <- load_diabetes_data(diabetes_df_raw, nsamples=2000, add_n_features=100) 
 
-diabetes_study1_df <- diabetes_data[['study1']]%>% 
-  mutate(map_mm_hg=dbp_mm_hg + (1/3)*(sbp_mm_hg-dbp_mm_hg)) %>% 
-  dplyr::select(-sbp_mm_hg, -dbp_mm_hg, -alt_u_l, -bun_mmol_l, -ccr_umol_l, -year_of_followup, -height_cm, -weight_kg) %>% 
-  relocate(map_mm_hg, .before = diabetes) %>% 
-  as.data.frame()
+diabetes_study1_df <- diabetes_data[['study1']]
 diabetes_study2_df <- diabetes_data[['study2']]
 
-diabetes_study3_df <- mplot::diabetes %>% 
-  mutate(cholesterol_mmol_l=tc/38.67, fpg_mmol_l=glu/18, hdl_c_mmol_l=hdl/38.67, ldl_mmol_l=ldl/38.67, triglyceride_mmol_l=exp(ltg)/38.67) %>% 
-  rename(age_y=age, gender_1_male_2_female=sex,bmi_kg_m2=bmi, map_mm_hg=map, diabetes=y) %>% 
-  dplyr::select(-tch,-ltg, -tc, -glu, -hdl, -ldl) %>% 
-  mutate(diabetes=factor(diabetes>120))
 ```
 ### Explored data
 ```{r report}
@@ -63,28 +54,53 @@ DataExplorer::plot_histogram()
 ```
 
 ```{r}
+plot_roc_auc <- function(yp_train_df, yp_test_df, y_train, y_test, label, base_size=25) {
 
-plot_roc_auc <- function(yp_train_df, yp_test_df) {
-  rf_preds =rbind(yp_train_df, yp_test_df) %>% mutate(subset=factor(subset, c("train", "test")))
+  preds <- yp_train_df %>%
+      bind_cols(y_train) %>%
+      mutate(subset="train") %>%
+    rbind(
+      yp_test_df %>%
+      bind_cols(y_test) %>%
+      mutate(subset="test")
+    ) %>%
+  mutate(subset=factor(subset, c("train", "test")))
 
-  auc_df = rf_preds %>% group_by(subset) %>% yardstick::roc_auc(truth = diabetes, .pred_0)  %>% rename(auc=.estimate)
-  roc_curve_df<-rf_preds %>% group_by(subset) %>% yardstick::roc_curve(truth = diabetes, .pred_0)
-  metrics_df = roc_curve_df %>% left_join(auc_df, by='subset')  
-  
+  auc_df <- preds %>%
+    group_by(subset) %>%
+      yardstick::roc_auc(truth = diabetes, .pred_0)  %>%
+        rename(auc=.estimate)
+
+  roc_curve_df <- preds %>%
+    group_by(subset) %>%
+      yardstick::roc_curve(truth = diabetes, .pred_0)
+
+  metrics_df = roc_curve_df %>%
+    left_join(auc_df, by='subset')
+
   # Plot training and external validation ROC curves
-  metrics_df %>% 
-    ggplot(aes(x=1-specificity, y=sensitivity, color=subset)) + 
-    geom_point(size=0.5) + 
-    theme_light(base_size = 16) + 
+  metrics_df %>%
+    ggplot(aes(x=1-specificity, y=sensitivity, color=subset)) +
+    geom_line() +
+    labs(title = paste(label, "ROC Curve"),
+         x = "False Positive Rate (1-Specificity)",
+         y = "True Positive Rate (Sensitivity)") +
+    theme_light(base_size = base_size) +
     geom_text(
       aes(x = 0.6, y = 0.3, label = paste("AUC =", round(auc,3))),
-      size = 5,  inherit.aes = FALSE
-  ) +  facet_wrap(~subset, nrow=1) + theme(legend.position = 'none')
+      size = base_size/2,  inherit.aes = FALSE
+    ) +  facet_wrap(~subset, nrow=1) + theme(legend.position = 'none')
 }
+
 ```
 ## Ex 1
 ### Fitting a model
 ```{r}
+
+diabetes_data <- load_diabetes_data(diabetes_df_raw, nsamples=400, add_n_features=10)
+diabetes_study1_df <- diabetes_data[['study1']]
+diabetes_study2_df <- diabetes_data[['study2']]
+
 # Setting up the model specification
 logit_spec <- logistic_reg(mode = "classification", penalty = 0, engine = "glm")
 
@@ -94,21 +110,22 @@ workflow <- workflow() %>%
   add_formula(diabetes ~ .) # Any variable on the left-hand side of the tilde (~) is considered the model outcome (here, arr_delay). On the right-hand side of the tilde are the predictors. Variables may be listed by name, or you can use the dot (.) to indicate all other variables as predictors.
 
 # Fitting the model
-fit <- workflow %>%
-  fit(data = diabetes_data[['study1']]) 
+model_fit <- workflow %>%
+         fit(data = diabetes_data[['study1']])
 
 # Make predictions
-rf_training_pred <- 
-  predict(fit, diabetes_data[['study1']], type = "prob") %>% 
-  bind_cols(diabetes_data[['study1']] %>% dplyr::select(diabetes)) %>% 
-  mutate(subset="train")
+diabetes_train_preds <- predict(model_fit, diabetes_data[['study1']], type = "prob")
+diabetes_test_preds  <- predict(model_fit, diabetes_data[['study2']], type = "prob")
 
-rf_testing_pred <- 
-  predict(fit, diabetes_data[['study2']], type = "prob") %>% 
-  bind_cols(diabetes_data[['study2']] %>% dplyr::select(diabetes)) %>% 
-  mutate(subset="test")
+# Pull out the actual labels
+diabetes_train_labels <- diabetes_data[['study1']] %>% dplyr::select(diabetes)
+diabetes_test_labels  <- diabetes_data[['study2']] %>% dplyr::select(diabetes)
 
-plot_roc_auc(rf_training_pred, rf_testing_pred)
+
+# Now plot the ROC curves and their AUCs
+plot_roc_auc(diabetes_train_preds, diabetes_test_preds,
+             diabetes_train_labels, diabetes_test_labels,
+             label="Diabetes - Logistic Regression")
 
 ```
 
