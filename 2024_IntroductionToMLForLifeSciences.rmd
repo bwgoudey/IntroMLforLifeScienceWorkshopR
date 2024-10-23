@@ -40,9 +40,9 @@ devtools::source_url('https://raw.githubusercontent.com/bwgoudey/IntroMLforLifeS
 You can also embed plots, for example:
 ### Load data
 ```{r pressure, echo=FALSE}
-diabetes_df_raw <- read.csv("./RC_health_data_n3266.csv") %>% filter(!is.na(id))
+diabetes_df_raw <- read.csv("./RC_health_data_n2000.csv") %>% filter(!is.na(id))
 
-diabetes_data <- load_diabetes_data(diabetes_df_raw, nsamples=2000, add_n_features=100) 
+diabetes_data <- load_diabetes_data(diabetes_df_raw, nsamples=2000, add_n_features=1000) 
 
 diabetes_study1_df <- diabetes_data[['study1']]
 diabetes_study2_df <- diabetes_data[['study2']]
@@ -125,7 +125,7 @@ diabetes_test_labels  <- diabetes_data[['study2']] %>% dplyr::select(diabetes)
 # Now plot the ROC curves and their AUCs
 plot_roc_auc(diabetes_train_preds, diabetes_test_preds,
              diabetes_train_labels, diabetes_test_labels,
-             label="Diabetes - Logistic Regression")
+             label="Diabetes - Logistic Regression", base_size = 20)
 
 ```
 
@@ -217,11 +217,16 @@ metrics %>%
 
 # external eval
 ```{r}
+#diabetes_data <- load_diabetes_data(diabetes_df_raw, nsamples=400, add_n_features=10)
+
 # Setup three types of splits
 # 1 Where we train on everything
 # 2 Where we train on the trianing data and test on the training data
 # 3 Where we train on the training data and test on the test data
-train_test_split_rset <- initial_split_to_rset(train_test_split, diabetes_df, all=T, df2=diabetes_study2_df)
+
+# Split study 1 into 80% for training, 20% for testing
+train_test_split=initial_split(diabetes_data[['study1']], prop = 0.8)
+train_test_split_rset <- initial_split_to_rset(train_test_split, diabetes_data[['study1']], all=T, df2=diabetes_data[['study2']])
 
 metrics_dict <- metric_set(roc_auc)
 
@@ -241,47 +246,64 @@ results <- multi_model_workflow %>%
 
 # Collect the metrics
 metrics <- results %>%
-  tune::collect_metrics(summarize=FALSE, type = "wide")
+  tune::collect_metrics(summarize=FALSE)
 
-metrics %>% 
-  ggplot(aes(x=id, y=.estimate, fill=model)) + 
-  geom_col(position='dodge') + 
-  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.5)) + 
-  ylab("AUC") + theme_light(base_size=18)
-
-
-
+metrics %>%
+  ggplot(aes(x=id, y=.estimate, fill=model)) +
+  geom_col(position='dodge') +
+    theme_light(base_size=22) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.5)) +
+  ylab("AUC")
 ```
 
 ```{r}
-metrics_dict <- metric_set(roc_auc)
+metrics_dict <- metric_set(accuracy, bal_accuracy, roc_auc, mn_log_loss)
+
+# Define models with some parameters for tuning
+models_tuned <- list()
+models_tuned[['log_reg_tune']] <- logistic_reg(mode = "classification") %>%
+  set_engine("glm")
+
+models_tuned[['lasso_tune']] <- logistic_reg(mode = "classification",penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet")
+
+models_tuned[['rf_tune']] <- rand_forest(mode = "classification",mtry = 1, trees = 500, min_n = tune()) %>%
+  set_engine("randomForest")
+
+models_tuned[['decision_tree_tune']] <- decision_tree(mode = "classification",tree_depth = tune()) %>%
+  set_engine("rpart")
+
+
+# Define the tuning grids
+log_reg_grid <- grid_regular(penalty(), levels = 10)
+lasso_grid <- grid_regular(penalty(), levels = 10)
+
+#d cross-validation
+kfold <- vfold_cv(diabetes_data[['study1']], v = 3, repeats = 2)
 
 multi_model_workflow <-  workflow_set(
     preproc = list("formula" = diabetes ~ .),
-    models = models
+    models = c(models,models_tuned)
   )
-
-# K-fold cross-validation
-kfold=vfold_cv(diabetes_df, v = 3, repeats = 2)
-
-# Fit models with resampling and pass options
+# Fit models with tuning and pass options
 results <- multi_model_workflow %>%
   workflow_map(
-    "fit_resamples",
+    "tune_grid",
     resamples = kfold,
+    grid = 5,
     metrics = metrics_dict,
-    control = control_resamples(save_pred = TRUE)
+    control = control_grid(save_pred = TRUE)
   )
 
 # Collect the metrics
 metrics <- results %>%
-  tune::collect_metrics(summarize=FALSE, type = "wide")
+ tune::collect_metrics(summarize = T)
 
-metrics %>% 
-  ggplot(aes(x=model, y=.estimate, fill=model)) + 
-  geom_boxplot(position='dodge') + 
-  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.5)) + 
-  ylab("AUC") + theme_light(base_size=18)
+autoplot(results, metric = "roc_auc") + theme_light(base_size=15)
+
+
+autoplot(results, metric = "roc_auc", id = 'formula_lasso_tune') + theme_light(base_size=15)
+
 ```
 
 
